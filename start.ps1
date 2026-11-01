@@ -49,7 +49,7 @@ if (!(Test-Path $envPath)) {
     "WTAGENT_SUPERVISOR_TOKEN=$supervisorToken"
     "WTAGENT_WORKSPACE_ID=discord"
   )
-  [IO.File]::WriteAllLines($envPath, [string[]]$lines, (New-Object Text.UTF8Encoding($false)))
+  [IO.File]::WriteAllLines($envPath, [string[]]$lines, ([System.Text.UTF8Encoding]::new($false)))
   $botToken = $null
   Write-Host "Configuration saved locally: $envPath"
 }
@@ -65,7 +65,7 @@ $settings = @{
   workspaces = @(@{ id = "discord"; root = (Resolve-Path $WorkspaceRoot).Path })
 }
 $json = $settings | ConvertTo-Json -Depth 5
-[IO.File]::WriteAllText($supervisorConfig, $json, (New-Object Text.UTF8Encoding($false)))
+[IO.File]::WriteAllText($supervisorConfig, $json, ([System.Text.UTF8Encoding]::new($false)))
 
 $venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (!(Test-Path $venvPython)) {
