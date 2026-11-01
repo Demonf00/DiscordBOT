@@ -18,6 +18,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(route_message("暂停"), "pause")
         self.assertEqual(route_message("继续"), "resume")
         self.assertEqual(route_message("怎么用"), "help")
+        self.assertEqual(route_message("有哪些任务"), "tasks")
 
     def test_real_requests_are_never_swallowed_by_keywords(self):
         for text in [
@@ -61,7 +62,7 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
             await ledger.put(first, status="running", channel_id=123,
                              user_id=456, progress_message_id=789, last_seq=0)
             await ledger.put(second, status="completed", channel_id=321,
-                             user_id=456, progress_message_id=790, last_seq=2)
+                             user_id=456, progress_message_id=790, last_seq=2, delivered=True)
             recovered = TaskLedger(filename)
             await recovered.load()
             self.assertEqual(recovered.latest(123, 456)[0], first)
