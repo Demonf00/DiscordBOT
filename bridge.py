@@ -173,7 +173,8 @@ class TaskLedger:
 
     def open_tasks(self):
         return [(key, item) for key, item in self.items.items()
-                if item.get("status") not in TERMINAL and item.get("status") is not None]
+                if item.get("status") is not None
+                and (item.get("status") not in TERMINAL or not item.get("delivered"))]
 
 
 def safe_event_label(event: dict) -> str | None:
