@@ -21,6 +21,7 @@ CANCEL_WORDS = frozenset({"取消", "取消任务", "停止", "停止任务", "�
 PAUSE_WORDS = frozenset({"暂停", "暂停任务", "pause"})
 RESUME_WORDS = frozenset({"继续", "继续任务", "恢复任务", "resume"})
 HELP_WORDS = frozenset({"帮助", "怎么用", "help", "你能做什么"})
+LIST_WORDS = frozenset({"任务列表", "有哪些任务", "查看任务", "列出任务", "所有任务", "tasks"})
 TASK_ID = re.compile(r"^task_[a-f0-9-]{36}$")
 MAX_REQUEST = 8000
 
@@ -38,6 +39,8 @@ def route_message(message: str) -> str:
         return "resume"
     if text in HELP_WORDS:
         return "help"
+    if text in LIST_WORDS:
+        return "tasks"
     return "task"
 
 
