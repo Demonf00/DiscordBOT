@@ -159,7 +159,9 @@ async def monitor_one(task_id, data):
     if status in TERMINAL:
         cause = (record.get("incident") or {}).get("code") or record.get("error") or status
         new_text = "🛑 " + status + " · " + short_id + "\n原因：" + clip(str(cause), 130)
-        view = None
+        await posted.edit(content=new_text, view=None)
+        await ledger.put(task_id, delivered=True)
+        return
     else:
         new_text = "⏳ WTAgent · " + status + " · " + short_id + "\n最近事件：" + clip(latest, 110)
         view = None
