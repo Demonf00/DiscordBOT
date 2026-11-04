@@ -142,15 +142,24 @@ async def monitor_one(task_id, data):
         if label:
             latest = label
     await ledger.put(task_id, status=status, last_seq=seq, last_event=latest)
-    if not data.get("progress_message_id"):
+    if data.get("user_id") not in OWNERS or data.get("channel_id") not in CHANNELS:
         return
     channel = await get_channel(data["channel_id"])
+    if not data.get("progress_message_id"):
+        # Recover a task created before its Discord acknowledgement was sent.
+        replacement = await channel.send(
+            "📥 WTAgent 任务 · " + task_id[-8:],
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        await ledger.put(task_id, progress_message_id=replacement.id)
+        data = {**data, "progress_message_id": replacement.id}
     posted = channel.get_partial_message(data["progress_message_id"])
     short_id = task_id[-8:]
     if status == "completed":
         if not data.get("delivered"):
             reply = str((record.get("result") or {}).get("message") or "(Agent 未提供可显示的结果)")
-            await posted.edit(content="✅ 已完成 · " + short_id + "\n" + clip(reply, 1780), view=None)
+            await posted.edit(content="✅ 已完成 · " + short_id + "\n" + clip(reply, 1780),
+                              view=None, allowed_mentions=discord.AllowedMentions.none())
             await ledger.put(task_id, delivered=True)
             for offset in range(1780, min(len(reply), 9500), 1780):
                 await channel.send(clip(reply[offset:offset+1780]),
@@ -159,11 +168,20 @@ async def monitor_one(task_id, data):
     if status in TERMINAL:
         cause = (record.get("incident") or {}).get("code") or record.get("error") or status
         new_text = "🛑 " + status + " · " + short_id + "\n原因：" + clip(str(cause), 130)
-        await posted.edit(content=new_text, view=None)
+        if status == "failed":
+            new_text += "\n可以回复「重试」，从同一任务 checkpoint 安全恢复。"
+        elif status == "blocked_uncertain":
+            new_text += "\n存在不确定的执行结果；不自动重放，请在本机检查后处理。"
+        await posted.edit(content=new_text, view=None,
+                          allowed_mentions=discord.AllowedMentions.none())
         await ledger.put(task_id, delivered=True)
         return
     else:
         new_text = "⏳ WTAgent · " + status + " · " + short_id + "\n最近事件：" + clip(latest, 110)
+        if status == "paused":
+            new_text += "\n任务已暂停。检查浏览器登录/验证后可回复「继续」。"
+        elif status == "waiting_retry":
+            new_text += "\n自动恢复已安排，等待下一次安全尝试。"
         view = None
         pending = record.get("pendingApproval") or {}
         if status == "waiting_approval" and re.fullmatch(r"[a-f0-9]{64}", str(pending.get("requestId", ""))):
@@ -171,7 +189,8 @@ async def monitor_one(task_id, data):
             view = ReviewView(task_id, pending["requestId"])
     if rendered.get(task_id) != new_text or (status == "waiting_approval"
            and data.get("approval_id") != (record.get("pendingApproval") or {}).get("requestId")):
-        await posted.edit(content=new_text, view=view)
+        await posted.edit(content=new_text, view=view,
+                          allowed_mentions=discord.AllowedMentions.none())
         rendered[task_id] = new_text
     await ledger.put(task_id, approval_id=(record.get("pendingApproval") or {}).get("requestId"))
 
@@ -238,7 +257,14 @@ async def control(message, intent):
         if intent == "status":
             task = await api.get(task_id)
             status = task.get("status", "unknown")
-            await message.reply("最近的任务 " + task_id[-8:] + "：" + str(status),
+            incident = task.get("incident") or {}
+            reason = incident.get("code") or task.get("error")
+            detail = (" · " + clip(str(reason), 90)) if reason else ""
+            if status == "waiting_retry" and task.get("retryAt"):
+                detail += "\n下次重试：" + clip(str(task["retryAt"]), 70)
+            if status == "blocked_uncertain":
+                detail += "\n不确定的动作需要本机检查，不能安全自动重试。"
+            await message.reply("最近的任务 " + task_id[-8:] + "：" + str(status) + detail,
                                 mention_author=False)
         else:
             operation = {"cancel": "cancel", "pause": "pause", "resume": "resume"}[intent]
@@ -271,36 +297,64 @@ async def on_message(message):
         await message.reply(
             "不用感叹号。直接说「帮我做个网站」「签到」「解释这个报错」。"
             "说「进度」「任务列表」「取消」「暂停」「继续」可以查询和操作任务。"
-            "需要授权的工具会显示审批按钮。所有 AI 请求都交给 WTAgent。",
+            "需要授权的工具会显示审批按钮。所有 AI 请求都交给 WTAgent。"
+            "说「工作区列表」「切换工作区 wtagent」可以选择可操作目录。",
             mention_author=False)
         return
     if intent in {"status", "cancel", "pause", "resume", "tasks"}:
         await control(message, intent)
         return
+    if intent in {"workspace", "workspaces", "switch_workspace"}:
+        try:
+            available = await api.available_workspaces()
+            current = ledger.workspace(message.channel.id, message.author.id, api.workspace_id)
+            if intent == "workspaces":
+                result = "可操作工作区：" + ", ".join(available) + "\n当前：" + current
+            elif intent == "workspace":
+                result = "当前工作区：" + current
+            else:
+                from bridge import SWITCH_WORKSPACE
+                selected = SWITCH_WORKSPACE.fullmatch(" ".join(text.strip().lower().split()))
+                target = selected.group(1) if selected else None
+                if target not in available:
+                    result = "工作区不存在或未授权。可选：" + ", ".join(available)
+                else:
+                    await ledger.set_workspace(message.channel.id, message.author.id, target)
+                    result = "已切换到工作区：" + target
+            await message.reply(result, mention_author=False)
+        except (SupervisorError, ValueError) as error:
+            await message.reply("工作区查询失败：" + clip(str(error), 240), mention_author=False)
+        return
     if len(text.encode("utf-8")) > 6200:
         await message.reply("消息太长，请拆成短一些的指令。", mention_author=False)
         return
     history = await prior_context(message.channel, message.id)
+    workspace_id = ledger.workspace(message.channel.id, message.author.id, api.workspace_id)
     instruction = (
         "你是通过 Discord 远程操作的 WTAgent。用户可以自然聊天、提问或要求你操作电脑。"
         "请使用已授权的工具完成可以确定的任务，提供真实结果；如果缺少网站、账户、"
         "签到目标等关键信息，明确询问，不要伪造成功。禁止泄露凭据。"
         "Discord 控制端提供了状态查询、取消、暂停、继续和逐次审批能力。"
         "向用户说明实际进展和结果，不要声称完成未经核验的工作。"
-        + history + "\n当前用户消息：\n" + text
+        "复杂任务需先拆分明确步骤、逐步执行，并尽量用测试或实际输出核验。"
+        "遇到不确定的副作用或需要权限时停下申请确认，不得盲目重复执行。"
+        + history + "\n当前工作区：" + workspace_id + "\n当前用户消息：\n" + text
     )
     try:
-        task = await api.create(instruction, message.id)
+        task = await api.create(instruction, message.id, workspace_id=workspace_id)
         task_id = task["taskId"]
+        # Persist identity before the Discord send: reconnect can recover the
+        # task even if the acknowledgement is lost.
+        await ledger.put(task_id, status=task.get("status", "queued"),
+                         channel_id=message.channel.id, user_id=message.author.id,
+                         source_message_id=message.id, progress_message_id=None,
+                         workspace_id=workspace_id, last_seq=0, delivered=False)
         sent = await message.reply(
             "📥 已交给 WTAgent · " + task_id[-8:] + "\n"
             "我会持续更新执行状态，完成后直接回复。",
             mention_author=False,
         )
-        await ledger.put(task_id, status=task.get("status", "queued"),
-                         channel_id=message.channel.id, user_id=message.author.id,
-                         source_message_id=message.id, progress_message_id=sent.id,
-                         last_seq=0, delivered=False)
+        await ledger.put(task_id, progress_message_id=sent.id)
     except (SupervisorError, ValueError) as error:
         await message.reply("⚠️ 创建任务失败：" + clip(str(error), 300), mention_author=False)
 
