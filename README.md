@@ -60,3 +60,52 @@ No Discord credentials or WTAgent service are required for these isolated unit t
 - Tool/status feedback is supported; live thought-stream content is not exposed by the current Supervisor REST API.
 - No automatic repeated task execution beyond what WTAgent's Worker can safely do; do not assume an ambiguous transaction is safe to replay.
 - Only one current task is addressed by the short `进度/暂停/继续/取消` phrases per user/channel. The Supervisor itself tracks other tasks by ID.
+
+
+## Reliability update (2026-11-03)
+
+This version separates the Discord **gateway** from the WTAgent **executor**. If
+the Discord Python process exits unexpectedly, `start.ps1` restarts only the
+gateway with capped backoff. The local WTAgent Supervisor stays running and the
+durable task ledger is reattached when the gateway reconnects. Press Ctrl+C to
+stop the launcher intentionally.
+
+In the private authorized channel, you can now say:
+- `诊断` / `health`: check authenticated Supervisor health and task counts (no task contents).
+- `工作区列表`: list the exact allowlisted workspace IDs.
+- `切换工作区 wtagent`: work on the WTAgent source tree, rather than the default `discord` workspace.
+- `当前工作区`: show the selection saved for your channel and user.
+- `任务列表`, `进度`, `暂停`, `继续`, `重试`, `取消`: manage submitted tasks without a prefix.
+
+`start.ps1` currently registers the workspace roots `D:\\AgentWorkspace` as
+`discord`, and `D:\\Github\\wtagent-selfdev` as `wtagent` (both configurable
+using startup parameters). Switching never accepts an arbitrary filesystem path.
+Only the configured owner(s) in the allowed channel(s) can submit or approve.
+
+A lost HTTP response to task creation is retried with the **same idempotency
+key**, so the Supervisor must return the original record rather than start a
+second task. The task identity is persisted before posting the Discord receipt,
+allowing recovery when that receipt cannot be sent. Failed tasks display a
+diagnostic code and offer explicit resume; `blocked_uncertain` remains a hard
+stop because retrying could duplicate a real-world action.
+
+**Scope limitation:** the current bridge submits single WTAgent conversation
+tasks. It is not yet a durable multi-step goal orchestrator. WTAgent's current
+browser testing tools are restricted to localhost, and native desktop screen
+control is not yet implemented. General PC GUI control requires a separate
+owner-approved desktop tool layer with screenshots, input actions, and
+checkpointed evidence; the bridge does not pretend it exists.
+
+### Troubleshooting a stopped task
+
+1. In Discord send `诊断`, `任务列表`, then `进度`.
+2. Check `.local/supervisor.stderr.log` in the DiscordBOT checkout.
+3. For a `paused` task, complete any browser login/verification and use `继续`.
+4. For `failed`, use `重试` to resume the *same* saved session; do not create
+   a new task to retry a potentially non-idempotent action.
+5. For `blocked_uncertain`, inspect local WTAgent session files and browser
+   state before deciding what to do; never force replay.
+
+Run `.\\.venv\\Scripts\\python.exe -m unittest test_bridge -v` after updating.
+The separate WTAgent branch should run `npm run check` and `npm test`.
+Do not switch either local checkout during a live worker operation.
