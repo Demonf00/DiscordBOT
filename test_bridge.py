@@ -21,6 +21,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(route_message("有哪些任务"), "tasks")
         self.assertEqual(route_message("任务列表"), "tasks")
         self.assertEqual(route_message("重试"), "resume")
+        self.assertEqual(route_message("诊断"), "health")
         self.assertEqual(route_message("工作区列表"), "workspaces")
         self.assertEqual(route_message("当前工作区"), "workspace")
         self.assertEqual(route_message("切换工作区 wtagent"), "switch_workspace")
