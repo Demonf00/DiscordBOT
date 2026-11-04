@@ -6,7 +6,7 @@ from pathlib import Path
 
 from bridge import (
     SupervisorClient, TaskLedger, route_message, safe_event_label,
-    clip, TASK_ID,
+    clip, TASK_ID, TERMINAL, SupervisorError,
 )
 
 
@@ -19,6 +19,13 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(route_message("继续"), "resume")
         self.assertEqual(route_message("怎么用"), "help")
         self.assertEqual(route_message("有哪些任务"), "tasks")
+        self.assertEqual(route_message("任务列表"), "tasks")
+        self.assertEqual(route_message("重试"), "resume")
+        self.assertEqual(route_message("工作区列表"), "workspaces")
+        self.assertEqual(route_message("当前工作区"), "workspace")
+        self.assertEqual(route_message("切换工作区 wtagent"), "switch_workspace")
+        self.assertEqual(route_message("帮我在wtagent工作区修改代码"), "task")
+        self.assertIn("failed", TERMINAL)
 
     def test_real_requests_are_never_swallowed_by_keywords(self):
         for text in [
@@ -70,6 +77,68 @@ class LedgerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([key for key, _ in recovered.open_tasks()], [first])
             self.assertNotIn("password", filename.read_text(encoding="utf-8").lower())
             self.assertEqual(json.loads(filename.read_text())["schema"], 1)
+            self.assertEqual(recovered.workspace(123, 456, "discord"), "discord")
+            await recovered.set_workspace(123, 456, "wtagent")
+            again = TaskLedger(filename)
+            await again.load()
+            self.assertEqual(again.workspace(123, 456, "discord"), "wtagent")
+            self.assertEqual(again.workspace(123, 999, "discord"), "discord")
+            with self.assertRaises(ValueError):
+                await again.set_workspace(123, 456, "../other")
+            await again.put(first, status="failed", delivered=False)
+            self.assertIn(first, [key for key, _ in again.open_tasks()])
+
+
+class ClientRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_uses_selected_workspace_and_stable_idempotency_key(self):
+        client = SupervisorClient("http://127.0.0.1:8765", "a" * 32, "discord")
+        calls = []
+
+        async def fake_request(method, path, *, body=None):
+            calls.append((method, path, body))
+            return {"task": {"taskId": "task_01234567-89ab-cdef-0123-456789abcdef"}}
+
+        client.request = fake_request
+        created = await client.create("write tests", 123456789012345, "wtagent")
+        self.assertTrue(TASK_ID.fullmatch(created["taskId"]))
+        self.assertEqual(calls[0][2], {
+            "workspaceId": "wtagent",
+            "instruction": "write tests",
+            "idempotencyKey": "discord-message-123456789012345",
+        })
+        with self.assertRaises(ValueError):
+            await client.create("x", 1, "../../secrets")
+
+    async def test_lost_http_response_retries_same_message_not_another_task(self):
+        client = SupervisorClient("http://127.0.0.1:8765", "a" * 32, "discord")
+        calls = []
+
+        async def fake_request(method, path, *, body=None):
+            calls.append(body.copy())
+            if len(calls) == 1:
+                raise SupervisorError("无法连接本地 WTAgent Supervisor；请确认服务仍在运行。")
+            return {"task": {"taskId": "task_01234567-89ab-cdef-0123-456789abcdef"}}
+
+        client.request = fake_request
+        await client.create("run tests", 12345)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])
+
+    async def test_available_workspace_ids_are_validated(self):
+        client = SupervisorClient("http://127.0.0.1:8765", "a" * 32, "discord")
+
+        async def valid(*_args, **_kwargs):
+            return {"workspaces": ["discord", "wtagent"]}
+
+        client.request = valid
+        self.assertEqual(await client.available_workspaces(), ["discord", "wtagent"])
+
+        async def invalid(*_args, **_kwargs):
+            return {"workspaces": ["../unsafe"]}
+
+        client.request = invalid
+        with self.assertRaises(SupervisorError):
+            await client.available_workspaces()
 
 
 if __name__ == "__main__":
