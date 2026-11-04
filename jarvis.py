@@ -8,7 +8,7 @@ from pathlib import Path
 
 import discord
 from dotenv import load_dotenv
-from bridge import SupervisorClient, SupervisorError, TaskLedger, TERMINAL, clip, route_message, safe_event_label
+from bridge import SupervisorClient, SupervisorError, TaskLedger, TERMINAL, CONTROL_WITH_ID, clip, route_message, safe_event_label
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -239,7 +239,9 @@ async def prior_context(channel, current_id):
 
 
 async def control(message, intent):
-    found = ledger.latest(message.channel.id, message.author.id)
+    specific = CONTROL_WITH_ID.fullmatch(" ".join(message.content.strip().lower().split()).strip("。！？!? "))
+    found = (ledger.by_suffix(message.channel.id, message.author.id, specific.group(2))
+             if specific else ledger.latest(message.channel.id, message.author.id))
     if intent == "tasks":
         related = [(key, item) for key, item in ledger.items.items()
                    if item.get("channel_id") == message.channel.id
@@ -250,7 +252,7 @@ async def control(message, intent):
                             mention_author=False)
         return
     if not found:
-        await message.reply("还没有任务。直接告诉我你想做什么即可。", mention_author=False)
+        await message.reply("找不到你在此频道的对应任务。可以发「任务列表」查看任务 ID。", mention_author=False)
         return
     task_id, _data = found
     try:
@@ -299,7 +301,8 @@ async def on_message(message):
             "说「进度」「任务列表」「取消」「暂停」「继续」可以查询和操作任务。"
             "需要授权的工具会显示审批按钮。所有 AI 请求都交给 WTAgent。"
             "说「工作区列表」「切换工作区 wtagent」可以选择可操作目录。"
-            "说「诊断」可以检查本地服务和任务状态。",
+            "说「诊断」可以检查本地服务和任务状态。"
+            "多个任务时可说「进度 12345678」「暂停 12345678」指定任务。",
             mention_author=False)
         return
     if intent == "health":
