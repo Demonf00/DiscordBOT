@@ -21,6 +21,7 @@ CANCEL_WORDS = frozenset({"取消", "取消任务", "停止", "停止任务", "�
 PAUSE_WORDS = frozenset({"暂停", "暂停任务", "pause"})
 RESUME_WORDS = frozenset({"继续", "继续任务", "恢复任务", "重试", "重试任务", "resume", "retry"})
 HELP_WORDS = frozenset({"帮助", "怎么用", "help", "你能做什么"})
+HEALTH_WORDS = frozenset({"诊断", "健康检查", "系统状态", "health", "doctor"})
 LIST_WORDS = frozenset({"任务列表", "有哪些任务", "查看任务", "列出任务", "所有任务", "tasks", "list tasks"})
 WORKSPACE_WORDS = frozenset({"当前工作区", "当前项目", "使用哪个工作区", "current workspace"})
 WORKSPACES_WORDS = frozenset({"工作区列表", "有哪些工作区", "列出工作区", "workspaces"})
@@ -32,6 +33,8 @@ MAX_REQUEST = 8000
 def route_message(message: str) -> str:
     """Only *entire* control phrases are intercepted; everything else goes to WTAgent."""
     text = " ".join(message.strip().lower().split()).strip("。！？!? ")
+    if text in HEALTH_WORDS:
+        return "health"
     if text in WORKSPACE_WORDS:
         return "workspace"
     if text in WORKSPACES_WORDS:
@@ -99,6 +102,12 @@ class SupervisorClient:
                 return data
         except (aiohttp.ClientError, asyncio.TimeoutError) as error:
             raise SupervisorError("无法连接本地 WTAgent Supervisor；请确认服务仍在运行。") from error
+
+    async def health(self):
+        data = await self.request("GET", "/v1/health")
+        if data.get("ok") is not True or not isinstance(data.get("counts"), dict):
+            raise SupervisorError("Invalid WTAgent health response.")
+        return data
 
     async def available_workspaces(self):
         data = await self.request("GET", "/v1/workspaces")
