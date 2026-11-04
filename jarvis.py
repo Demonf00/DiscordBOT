@@ -298,8 +298,21 @@ async def on_message(message):
             "不用感叹号。直接说「帮我做个网站」「签到」「解释这个报错」。"
             "说「进度」「任务列表」「取消」「暂停」「继续」可以查询和操作任务。"
             "需要授权的工具会显示审批按钮。所有 AI 请求都交给 WTAgent。"
-            "说「工作区列表」「切换工作区 wtagent」可以选择可操作目录。",
+            "说「工作区列表」「切换工作区 wtagent」可以选择可操作目录。"
+            "说「诊断」可以检查本地服务和任务状态。",
             mention_author=False)
+        return
+    if intent == "health":
+        try:
+            health = await api.health()
+            counts = health.get("counts", {})
+            description = "、".join(f"{k}: {int(v)}" for k, v in sorted(counts.items())
+                                   if isinstance(v, int) and not isinstance(v, bool))
+            await message.reply("WTAgent Supervisor 在线。\n任务：" + (description or "暂无"),
+                                mention_author=False)
+        except SupervisorError as error:
+            await message.reply("WTAgent Supervisor 无响应：" + clip(str(error), 200),
+                                mention_author=False)
         return
     if intent in {"status", "cancel", "pause", "resume", "tasks"}:
         await control(message, intent)
