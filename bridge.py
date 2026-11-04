@@ -28,7 +28,7 @@ WORKSPACES_WORDS = frozenset({"工作区列表", "有哪些工作区", "列出�
 SWITCH_WORKSPACE = re.compile(r"^(?:切换(?:到)?工作区|使用工作区|workspace)\s*[:：]?\s*([a-zA-Z0-9_-]{1,64})$", re.I)
 TASK_ID = re.compile(r"^task_[a-f0-9-]{36}$")
 CONTROL_WITH_ID = re.compile(
-    r"^(进度|查看进度|取消|暂停|继续|重试|status|cancel|pause|resume|retry)\\s+([a-f0-9]{8})$",
+    r"^(进度|查看进度|取消|暂停|继续|重试|status|cancel|pause|resume|retry)\s+([a-f0-9]{8})$",
     re.I,
 )
 MAX_REQUEST = 8000
