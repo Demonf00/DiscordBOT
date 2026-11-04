@@ -59,6 +59,15 @@ class RouteTests(unittest.TestCase):
             "type": "unknown.private",
             "payload": {"name": "SECRET"},
         }))
+        self.assertEqual(safe_event_label({
+            "type": "tool.started", "payload": {"toolClass": "read"},
+        }), "tool.started: read")
+        self.assertEqual(safe_event_label({
+            "type": "tool.result_sent", "payload": {"toolClass": "other", "ok": False},
+        }), "tool.result_sent: other ✗")
+        self.assertIsNone(safe_event_label({
+            "type": "secrets.read", "payload": {"private": "abc"},
+        }))
         self.assertNotIn("@everyone", clip("hello @everyone @here"))
 
 
