@@ -27,12 +27,25 @@ WORKSPACE_WORDS = frozenset({"当前工作区", "当前项目", "使用哪个工
 WORKSPACES_WORDS = frozenset({"工作区列表", "有哪些工作区", "列出工作区", "workspaces"})
 SWITCH_WORKSPACE = re.compile(r"^(?:切换(?:到)?工作区|使用工作区|workspace)\s*[:：]?\s*([a-zA-Z0-9_-]{1,64})$", re.I)
 TASK_ID = re.compile(r"^task_[a-f0-9-]{36}$")
+CONTROL_WITH_ID = re.compile(
+    r"^(进度|查看进度|取消|暂停|继续|重试|status|cancel|pause|resume|retry)\\s+([a-f0-9]{8})$",
+    re.I,
+)
 MAX_REQUEST = 8000
 
 
 def route_message(message: str) -> str:
     """Only *entire* control phrases are intercepted; everything else goes to WTAgent."""
     text = " ".join(message.strip().lower().split()).strip("。！？!? ")
+    matched = CONTROL_WITH_ID.fullmatch(text)
+    if matched:
+        verb = matched.group(1)
+        return {
+            "进度": "status", "查看进度": "status", "status": "status",
+            "取消": "cancel", "cancel": "cancel",
+            "暂停": "pause", "pause": "pause",
+            "继续": "resume", "重试": "resume", "resume": "resume", "retry": "resume",
+        }[verb]
     if text in HEALTH_WORDS:
         return "health"
     if text in WORKSPACE_WORDS:
@@ -235,6 +248,16 @@ class TaskLedger:
             return None
         # Insertion order survives JSON persistence; don't fall back to someone else's tasks.
         return entries[-1]
+
+    def by_suffix(self, channel_id: int, user_id: int, suffix: str):
+        if not re.fullmatch(r"[a-f0-9]{8}", suffix):
+            return None
+        matches = [(key, item) for key, item in self.items.items()
+                   if key.endswith(suffix)
+                   and item.get("channel_id") == channel_id
+                   and item.get("user_id") == user_id]
+        # Never assume a shortened ID is unique if there is a collision.
+        return matches[0] if len(matches) == 1 else None
 
     def open_tasks(self):
         return [(key, item) for key, item in self.items.items()
