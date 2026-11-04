@@ -62,7 +62,11 @@ if (!$config["WTAGENT_SUPERVISOR_TOKEN"] -or !$config["DISCORD_BOT_TOKEN"]) {
 }
 $settings = @{
   port = 8765
-  workspaces = @(@{ id = "discord"; root = (Resolve-Path $WorkspaceRoot).Path })
+  workspaces = @(
+    @{ id = "discord"; root = (Resolve-Path $WorkspaceRoot).Path }
+    @{ id = "wtagent"; root = (Resolve-Path $WTAgentRoot).Path }
+  )
+  options = @{ recovery = @{ progressTimeoutMs = 900000 } }
 }
 $json = $settings | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText($supervisorConfig, $json, ([System.Text.UTF8Encoding]::new($false)))
@@ -103,8 +107,17 @@ try {
   Write-Host "WTAgent Supervisor ready on 127.0.0.1:8765." -ForegroundColor Green
   Write-Host "Starting Discord Bot. Type a normal message in your allowed channel." -ForegroundColor Green
   Write-Host "Ctrl+C stops the Discord Bot and the Supervisor started by this script."
-  & $venvPython (Join-Path $PSScriptRoot "jarvis.py")
-  if ($LASTEXITCODE -ne 0) { throw "Discord bot exited with code $LASTEXITCODE" }
+  # Restart only the Discord gateway after a transient crash. The Supervisor
+  # and its durable workers must NOT be torn down every time Discord reconnects.
+  $restart = 0
+  while ($true) {
+    & $venvPython (Join-Path $PSScriptRoot "jarvis.py")
+    if ($LASTEXITCODE -eq 0) { break }
+    $restart++
+    $delay = [int][Math]::Min(30, [Math]::Pow(2, [Math]::Min($restart, 5)))
+    Write-Warning "Discord gateway exited (code $LASTEXITCODE). Supervisor is still running. Retrying in $delay seconds. Use Ctrl+C to stop."
+    Start-Sleep -Seconds $delay
+  }
 } finally {
   if ($service -and !$service.HasExited) {
     Stop-Process -Id $service.Id -ErrorAction SilentlyContinue
