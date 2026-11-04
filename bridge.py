@@ -280,6 +280,12 @@ def safe_event_label(event: dict) -> str | None:
         name = payload.get("name")
         if isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9_.-]{0,95}", name):
             return f"{kind}: {name}"
+        tool_class = payload.get("toolClass")
+        if tool_class in {"read", "verify", "other", "unknown"}:
+            outcome = ""
+            if kind == "tool.result_sent" and isinstance(payload.get("ok"), bool):
+                outcome = " ✓" if payload["ok"] else " ✗"
+            return f"{kind}: {tool_class}{outcome}"
         return kind
     if kind in {"model.message_complete", "runtime.initializing", "run.completed",
                 "model.message_sent", "protocol.invalid"}:
